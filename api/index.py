@@ -1,14 +1,11 @@
-"""
-Vercel Serverless Function: Fund Analysis
-GET /api/analyze?scheme=122639
-"""
-
+"""MoneyIQ Fund Analyzer - Flask API for Vercel"""
 import json
 import math
 import urllib.request
 from datetime import datetime, timedelta
-from http.server import BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
 
 RISK_FREE_RATE = 0.07
 ROLLING_WINDOWS = [3, 5]
@@ -279,96 +276,114 @@ def calculate_capture_ratios(fund_nav, market_nav, period_years=None):
     }
 
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        params = parse_qs(urlparse(self.path).query)
-        scheme_code = params.get("scheme", [""])[0].strip()
-        if not scheme_code or not scheme_code.isdigit():
-            self._respond(400, {"error": "Valid scheme code required (e.g. ?scheme=122639)"})
-            return
-        try:
-            meta, nav_list = fetch_nav(scheme_code)
-            if len(nav_list) < 30:
-                self._respond(422, {"error": "Insufficient NAV data for analysis"})
-                return
-            scheme_name = meta.get("scheme_name", "Unknown Fund")
-            earliest = nav_list[0]
-            latest = nav_list[-1]
-            years_of_data = round((latest[0] - earliest[0]).days / 365.25, 1)
-            ptp = calculate_point_to_point_returns(nav_list)
-            rolling = {}
-            for w in ROLLING_WINDOWS:
-                if years_of_data >= w + 0.5:
-                    r = calculate_rolling_returns(nav_list, w)
-                    if r:
-                        rolling[f"{w}Y"] = {
-                            "window_years": w,
-                            "summary": summarize_rolling(r),
-                            "distribution": build_distribution(r),
-                            "time_series": [
-                                {"start_date": x["start_date"], "cagr_pct": x["cagr_pct"]}
-                                for x in r[::5]
-                            ],
-                        }
-            risk = calculate_risk_metrics(nav_list)
-            capture = {}
-            try:
-                proxy_key = detect_market_proxy(scheme_name)
-                proxy_info = MARKET_PROXIES.get(proxy_key, MARKET_PROXIES["nifty_50"])
-                _, market_nav = fetch_nav(proxy_info["code"])
-                if market_nav:
-                    for label, yrs in [("3Y", 3), ("5Y", 5), ("since_inception", None)]:
-                        cr = calculate_capture_ratios(nav_list, market_nav, yrs)
-                        if cr:
-                            cr["benchmark"] = proxy_info["name"]
-                            cr["benchmark_fund"] = proxy_info["fund"]
-                            capture[label] = cr
-            except Exception:
-                pass
-            nav_chart = [
-                {"date": d.strftime("%Y-%m-%d"), "nav": round(n, 2)}
-                for d, n in nav_list[::5]
-            ]
-            if nav_list[-1] != nav_list[::5][-1] if nav_list[::5] else True:
-                nav_chart.append({"date": latest[0].strftime("%Y-%m-%d"), "nav": round(latest[1], 2)})
-            result = {
-                "meta": {
-                    "scheme_code": meta.get("scheme_code", scheme_code),
-                    "scheme_name": scheme_name,
-                    "fund_house": meta.get("fund_house", ""),
-                    "scheme_category": meta.get("scheme_category", ""),
-                    "scheme_type": meta.get("scheme_type", ""),
-                },
-                "data_summary": {
-                    "total_data_points": len(nav_list),
-                    "earliest_date": earliest[0].strftime("%Y-%m-%d"),
-                    "latest_date": latest[0].strftime("%Y-%m-%d"),
-                    "earliest_nav": round(earliest[1], 4),
-                    "latest_nav": round(latest[1], 4),
-                    "years_of_data": years_of_data,
-                },
-                "nav_chart": nav_chart,
-                "point_to_point_returns": ptp,
-                "rolling_returns": rolling,
-                "risk_metrics": risk,
-                "capture_ratios": capture,
-                "calculated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "disclaimer": (
-                    "This analysis is generated using publicly available historical NAV data "
-                    "from AMFI (Association of Mutual Funds in India) and is provided for "
-                    "educational and informational purposes only. It does not constitute "
-                    "investment advice. Past performance does not guarantee future results. "
-                    "Mutual fund investments are subject to market risks."
-                ),
-            }
-            self._respond(200, result)
-        except Exception as e:
-            self._respond(502, {"error": f"Analysis failed: {str(e)}"})
+@app.route("/api/search")
+def search():
+    q = request.args.get("q", "").strip()
+    if not q or len(q) < 2:
+        return jsonify({"error": "Query must be at least 2 characters", "results": []}), 400
+    try:
+        url = f"https://api.mfapi.in/mf/search?q={urllib.request.quote(q)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "MoneyIQ-Fund-Analyzer/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        results = []
+        for item in data:
+            name = item.get("schemeName", "")
+            results.append({
+                "schemeCode": item["schemeCode"],
+                "schemeName": name,
+                "isDirect": "direct" in name.lower(),
+                "isGrowth": "growth" in name.lower(),
+            })
+        results.sort(key=lambda x: (not x["isDirect"], not x["isGrowth"]))
+        resp = jsonify({"results": results[:20]})
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+    except Exception as e:
+        return jsonify({"error": f"Failed to search funds: {str(e)}", "results": []}), 502
 
-    def _respond(self, status, data):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "public, max-age=1800")
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode("utf-8"))
+
+@app.route("/api/analyze")
+def analyze():
+    scheme_code = request.args.get("scheme", "").strip()
+    if not scheme_code or not scheme_code.isdigit():
+        return jsonify({"error": "Valid scheme code required (e.g. ?scheme=122639)"}), 400
+    try:
+        meta, nav_list = fetch_nav(scheme_code)
+        if len(nav_list) < 30:
+            return jsonify({"error": "Insufficient NAV data for analysis"}), 422
+        scheme_name = meta.get("scheme_name", "Unknown Fund")
+        earliest = nav_list[0]
+        latest = nav_list[-1]
+        years_of_data = round((latest[0] - earliest[0]).days / 365.25, 1)
+        ptp = calculate_point_to_point_returns(nav_list)
+        rolling = {}
+        for w in ROLLING_WINDOWS:
+            if years_of_data >= w + 0.5:
+                r = calculate_rolling_returns(nav_list, w)
+                if r:
+                    rolling[f"{w}Y"] = {
+                        "window_years": w,
+                        "summary": summarize_rolling(r),
+                        "distribution": build_distribution(r),
+                        "time_series": [
+                            {"start_date": x["start_date"], "cagr_pct": x["cagr_pct"]}
+                            for x in r[::5]
+                        ],
+                    }
+        risk = calculate_risk_metrics(nav_list)
+        capture = {}
+        try:
+            proxy_key = detect_market_proxy(scheme_name)
+            proxy_info = MARKET_PROXIES.get(proxy_key, MARKET_PROXIES["nifty_50"])
+            _, market_nav = fetch_nav(proxy_info["code"])
+            if market_nav:
+                for label, yrs in [("3Y", 3), ("5Y", 5), ("since_inception", None)]:
+                    cr = calculate_capture_ratios(nav_list, market_nav, yrs)
+                    if cr:
+                        cr["benchmark"] = proxy_info["name"]
+                        cr["benchmark_fund"] = proxy_info["fund"]
+                        capture[label] = cr
+        except Exception:
+            pass
+        nav_chart = [
+            {"date": d.strftime("%Y-%m-%d"), "nav": round(n, 2)}
+            for d, n in nav_list[::5]
+        ]
+        if nav_list[-1] != nav_list[::5][-1] if nav_list[::5] else True:
+            nav_chart.append({"date": latest[0].strftime("%Y-%m-%d"), "nav": round(latest[1], 2)})
+        result = {
+            "meta": {
+                "scheme_code": meta.get("scheme_code", scheme_code),
+                "scheme_name": scheme_name,
+                "fund_house": meta.get("fund_house", ""),
+                "scheme_category": meta.get("scheme_category", ""),
+                "scheme_type": meta.get("scheme_type", ""),
+            },
+            "data_summary": {
+                "total_data_points": len(nav_list),
+                "earliest_date": earliest[0].strftime("%Y-%m-%d"),
+                "latest_date": latest[0].strftime("%Y-%m-%d"),
+                "earliest_nav": round(earliest[1], 4),
+                "latest_nav": round(latest[1], 4),
+                "years_of_data": years_of_data,
+            },
+            "nav_chart": nav_chart,
+            "point_to_point_returns": ptp,
+            "rolling_returns": rolling,
+            "risk_metrics": risk,
+            "capture_ratios": capture,
+            "calculated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "disclaimer": (
+                "This analysis is generated using publicly available historical NAV data "
+                "from AMFI (Association of Mutual Funds in India) and is provided for "
+                "educational and informational purposes only. It does not constitute "
+                "investment advice. Past performance does not guarantee future results. "
+                "Mutual fund investments are subject to market risks."
+            ),
+        }
+        resp = jsonify(result)
+        resp.headers["Cache-Control"] = "public, max-age=1800"
+        return resp
+    except Exception as e:
+        return jsonify({"error": f"Analysis failed: {str(e)}"}), 502
