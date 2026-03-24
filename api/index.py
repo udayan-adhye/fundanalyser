@@ -34,12 +34,23 @@ MARKET_PROXIES = {
 
 
 def fetch_nav(scheme_code):
+    import time
     url = f"https://api.mfapi.in/mf/{scheme_code}"
-    req = urllib.request.Request(url, headers={"User-Agent": "MoneyIQ-Fund-Analyzer/1.0"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        raw = json.loads(resp.read().decode("utf-8"))
-    if raw.get("status") == "ERROR" or "data" not in raw:
-        raise ValueError("API returned error or no data")
+    last_err = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MoneyIQ-Fund-Analyzer/1.0"})
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+            if raw.get("status") == "ERROR" or "data" not in raw:
+                raise ValueError("API returned error or no data")
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(1)
+    else:
+        raise last_err
     meta = raw["meta"]
     nav_list = []
     for entry in raw["data"]:
