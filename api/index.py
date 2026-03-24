@@ -1,11 +1,23 @@
 """MoneyIQ Fund Analyzer - Flask API for Vercel"""
 import json
 import math
+import os
 import urllib.request
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+
+# Load HTML at module level so it is read once
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_HTML_PATH = os.path.join(_THIS_DIR, "page.html")
+with open(_HTML_PATH, "r") as _f:
+    _INDEX_HTML = _f.read()
+
+
+@app.route("/")
+def home():
+    return _INDEX_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 RISK_FREE_RATE = 0.07
 ROLLING_WINDOWS = [3, 5]
