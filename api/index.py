@@ -3,9 +3,15 @@ import json
 import math
 import urllib.request
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request, jsonify, send_from_directory
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../public', static_url_path='')
+
+
+@app.route('/')
+def serve_index():
+    return send_from_directory(app.static_folder, 'index.html')
 
 RISK_FREE_RATE = 0.07
 ROLLING_WINDOWS = [3, 5]
