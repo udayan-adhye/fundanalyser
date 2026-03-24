@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoneyIQ Fund Analyzer — Instant Mutual Fund Analysis</title>
+    <meta name="description" content="Get instant, detailed analysis of any Indian mutual fund. Returns, risk metrics, rolling returns, capture ratios — all from live data.">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface-2: #334155;
+            --border: #475569;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --primary: #818cf8;
+            --primary-glow: rgba(129, 140, 248, 0.15);
+            --green: #10b981;
+            --yellow: #fbbf24;
+            --red: #ef4444;
+            --accent: #6366f1;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* Container */
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+        /* Hero / Search */
+        .hero {
+            text-align: center; padding: 60px 20px 40px;
+        }
+        .hero h1 {
+            font-size: 42px; font-weight: 800;
+            background: linear-gradient(135deg, #818cf8, #6366f1, #a78bfa);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .hero p { color: var(--text-muted); font-size: 18px; margin-bottom: 32px; }
+        .hero .brand-tag { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+        /* Search */
+        .search-box {
+            position: relative; max-width: 600px; margin: 0 auto;
+        }
+        .search-input {
+            width: 100%; padding: 16px 20px; font-size: 17px;
+            background: var(--surface); border: 2px solid var(--border);
+            border-radius: 14px; color: var(--text); outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-input:focus { border-color: var(--primary); }
+        .search-input::placeholder { color: var(--text-dim); }
+
+        /* Dropdown */
+        .dropdown {
+            position: absolute; top: 100%; left: 0; right: 0;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; margin-top: 6px; max-height: 320px;
+            overflow-y: auto; z-index: 100; display: none;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        .dropdown.show { display: block; }
+        .dropdown-item {
+            padding: 12px 18px; cursor: pointer; border-bottom: 1px solid #1e293b;
+            transition: background 0.15s;
+        }
+        .dropdown-item:hover { background: var(--surface-2); }
+        .dropdown-item .fund-name { font-size: 14px; font-weight: 500; }
+        .dropdown-item .fund-code { font-size: 12px; color: var(--text-dim); }
+        .dropdown-item .badge-direct {
+            font-size: 10px; background: rgba(16, 185, 129, 0.2); color: var(--green);
+            padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+        }
+
+        /* Loading */
+        .loader { display: none; text-align: center; padding: 60px 20px; }
+        .loader.show { display: block; }
+        .spinner {
+            width: 44px; height: 44px; border: 3px solid var(--surface-2);
+            border-top-color: var(--primary); border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loader p { color: var(--text-muted); font-size: 15px; }
+        .loader .sub { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+        /* Error */
+        .error-box {
+            display: none; max-width: 600px; margin: 20px auto; padding: 20px;
+            background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px; text-align: center; color: var(--red);
+        }
+        .error-box.show { display: block; }
+
+        /* Report */
+        #report { display: none; }
+        #report.show { display: block; }
+
+        .report-header {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%);
+            color: white; padding: 36px; border-radius: 16px; margin-bottom: 20px;
+        }
+        .report-header h2 { font-size: 26px; font-weight: 700; margin-bottom: 4px; }
+        .report-header .meta-row {
+            display: flex; gap: 16px; flex-wrap: wrap;
+            font-size: 13px; opacity: 0.8; margin-top: 10px;
+        }
+        .report-header .meta-row span { display: flex; align-items: center; gap: 4px; }
+        .tag {
+            background: rgba(255,255,255,0.15); padding: 2px 10px;
+            border-radius: 20px; font-size: 11px;
+        }
+        .tag.benchmark { background: rgba(245, 158, 11, 0.3); }
+
+        /* Sections */
+        .section {
+            background: var(--surface); border-radius: 14px;
+            padding: 28px; margin-bottom: 16px;
+        }
+        .section h3 {
+            font-size: 18px; font-weight: 700; margin-bottom: 4px;
+        }
+        .section .desc { font-size: 13px; color: var(--text-dim); margin-bottom: 20px; }
+
+        /* Stat cards */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px; margin-bottom: 16px;
+        }
+        .stat-card {
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: 10px; padding: 16px; text-align: center;
+        }
+        .stat-card.highlight { border-color: var(--green); background: rgba(16, 185, 129, 0.05); }
+        .stat-val { font-size: 24px; font-weight: 700; }
+        .stat-label { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+        /* Tables */
+        .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .data-table th {
+            text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border);
+            color: var(--text-dim); font-weight: 600; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .data-table td { padding: 10px 12px; border-bottom: 1px solid #1e293b; }
+        .data-table tr:hover { background: rgba(255,255,255,0.02); }
+
+        /* Charts */
+        .chart-wrapper { position: relative; height: 300px; margin: 16px 0; }
+
+        /* Tabs */
+        .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+        .tab-btn {
+            padding: 8px 18px; font-size: 13px; font-weight: 600;
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text-muted); cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Explainer boxes */
+        .explainer {
+            margin-top: 16px; padding: 14px; border-radius: 8px;
+            font-size: 13px; color: var(--text-muted); line-height: 1.7;
+            background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.15);
+        }
+        .explainer strong { color: var(--text); }
+
+        /* Disclaimer */
+        .disclaimer {
+            padding: 18px; border-radius: 10px; font-size: 12px;
+            color: #ca8a04; background: rgba(234, 179, 8, 0.06);
+            border: 1px solid rgba(234, 179, 8, 0.15);
+            line-height: 1.7; margin-top: 16px;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center; padding: 30px; font-size: 12px; color: var(--text-dim);
+        }
+        .footer a { color: var(--primary); text-decoration: none; }
+
+        /* Back button */
+        .back-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 10px 20px; font-size: 14px; font-weight: 600;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; color: var(--text-muted); cursor: pointer;
+            margin-bottom: 20px; transition: all 0.2s;
+        }
+        .back-btn:hover { background: var(--surface-2); color: var(--text); }
+
+        /* Color utilities */
+        .c-green { color: var(--green); }
+        .c-yellow { color: var(--yellow); }
+        .c-red { color: var(--red); }
+        .c-muted { color: var(--text-dim); }
+        .fw-bold { font-weight: 700; }
+        .text-right { text-align: right; }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .hero h1 { font-size: 28px; }
+            .hero p { font-size: 15px; }
+            .search-input { font-size: 15px; padding: 14px 16px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .report-header { padding: 24px; }
+            .report-header h2 { font-size: 20px; }
+            .section { padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- HERO / SEARCH -->
+    <div id="heroSection" class="hero">
+        <h1>MoneyIQ Fund Analyzer</h1>
+        <p>Instant, in-depth analysis of any Indian mutual fund</p>
+        <div class="search-box">
+            <input type="text" id="searchInput" class="search-input"
+                   placeholder="Search for a fund... e.g. Parag Parikh Flexi Cap"
+                   autocomplete="off">
+            <div id="dropdown" class="dropdown"></div>
+        </div>
+        <p class="brand-tag" style="margin-top: 24px;">Powered by live AMFI data &bull; No sign-up required</p>
+    </div>
+
+    <!-- LOADING -->
+    <div id="loader" class="loader">
+        <div class="spinner"></div>
+        <p id="loaderText">Fetching NAV data...</p>
+        <p class="sub" id="loaderSub">This may take 5-10 seconds for the first load</p>
+    </div>
+
+    <!-- ERROR -->
+    <div id="errorBox" class="error-box">
+        <p id="errorText"></p>
+    </div>
+
+    <!-- REPORT -->
+    <div id="report" class="container">
+        <!-- Filled by JavaScript -->
+    </div>
+
+    <script>
+    // =====================================================================
+    // APP STATE
+    // =====================================================================
+    let searchTimeout = null;
+    const searchInput = document.getElementById('searchInput');
+    const dropdown = document.getElementById('dropdown');
+    const loader = document.getElementById('loader');
+    const errorBox = document.getElementById('errorBox');
+    const reportEl = document.getElementById('report');
+    const heroSection = document.getElementById('heroSection');
+
+    // =====================================================================
+    // SEARCH
+    // =====================================================================
+    searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        const q = searchInput.value.trim();
+        if (q.length < 2) { dropdown.classList.remove('show'); return; }
+        searchTimeout = setTimeout(() => searchFunds(q), 300);
+    });
+
+    searchInput.addEventListener('focus', () => {
+        if (dropdown.children.length > 0) dropdown.classList.add('show');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-box')) dropdown.classList.remove('show');
+    });
+
+    async function searchFunds(q) {
+        try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            renderDropdown(data.results || []);
+        } catch (e) {
+            renderDropdown([]);
+        }
+    }
+
+    function renderDropdown(results) {
+        if (!results.length) {
+            dropdown.innerHTML = '<div class="dropdown-item"><span class="fund-name c-muted">No funds found</span></div>';
+            dropdown.classList.add('show');
+            return;
+        }
+        dropdown.innerHTML = results.map(r => `
+            <div class="dropdown-item" onclick="selectFund(${r.schemeCode}, '${r.schemeName.replace(/'/g, "\\'")}')">
+                <span class="fund-name">${r.schemeName}</span>
+                ${r.isDirect ? '<span class="badge-direct">Direct</span>' : ''}
+                <br><span class="fund-code">Code: ${r.schemeCode}</span>
+            </div>
+        `).join('');
+        dropdown.classList.add('show');
+    }
+
+    function selectFund(code, name) {
+        dropdown.classList.remove('show');
+        searchInput.value = name;
+        analyzeFund(code);
+    }
+
+    // =====================================================================
+    // ANALYZE
+    // =====================================================================
+    async function analyzeFund(schemeCode) {
+        heroSection.style.display = 'none';
+        reportEl.classList.remove('show');
+        errorBox.classList.remove('show');
+        loader.classList.add('show');
+
+        const stages = [
+            'Fetching NAV data from AMFI...',
+            'Computing returns & CAGR...',
+            'Running rolling return analysis...',
+            'Calculating risk metrics...',
+            'Fetching benchmark for capture ratios...',
+        ];
+        let stage = 0;
+        const stageInterval = setInterval(() => {
+            stage++;
+            if (stage < stages.length) {
+                document.getElementById('loaderText').textContent = stages[stage];
+            }
+        }, 2000);
+
+        try {
+            const res = await fetch(`/api/analyze?scheme=${schemeCode}`);
+            const data = await res.json();
+            clearInterval(stageInterval);
+
+            if (res.ok) {
+                loader.classList.remove('show');
+                renderReport(data);
+            } else {
+                throw new Error(data.error || 'Analysis failed');
+            }
+        } catch (e) {
+            clearInterval(stageInterval);
+            loader.classList.remove('show');
+            heroSection.style.display = 'block';
+            errorBox.classList.add('show');
+            document.getElementById('errorText').textContent = e.message || 'Something went wrong. Please try again.';
+        }
+    }
+
+    function goBack() {
+        reportEl.classList.remove('show');
+        heroSection.style.display = 'block';
+        searchInput.value = '';
+        searchInput.focus();
+    }
+
+    // =====================================================================
+    // RENDER REPORT
+    // =====================================================================
+    function renderReport(data) {
+        const m = data.meta;
+        const ds = data.data_summary;
+        const ptp = data.point_to_point_returns;
+        const rolling = data.rolling_returns;
+        const risk = data.risk_metrics;
+        const capture = data.capture_ratios;
+        const nav = data.nav_chart;
+
+        // Determine benchmark name
+        let benchmarkName = '';
+        if (capture && Object.keys(capture).length > 0) {
+            const firstKey = Object.keys(capture)[0];
+            benchmarkName = capture[firstKey].benchmark || '';
+        }
+
+        reportEl.innerHTML = `
+            <button class="back-btn" onclick="goBack()">← Analyze another fund</button>
+
+            <!-- HEADER -->
+            <div class="report-header">
+                <h2>${m.scheme_name}</h2>
+                <div class="meta-row">
+                    <span><span class="tag">${m.fund_house}</span></span>
+                    <span><span class="tag">${m.scheme_category || 'N/A'}</span></span>
+                    <span>NAV: ₹${ds.latest_nav} (${ds.latest_date})</span>
+                    <span>Data: ${ds.years_of_data} years</span>
+                </div>
+                ${benchmarkName ? `<div style="margin-top:8px;"><span class="tag benchmark">Benchmark: ${benchmarkName}</span></div>` : ''}
+            </div>
+
+            <!-- NAV CHART -->
+            <div class="section">
+                <h3>NAV History</h3>
+                <p class="desc">Growth of ₹${ds.earliest_nav} invested on ${ds.earliest_date} → ₹${ds.latest_nav} today</p>
+                <div class="chart-wrapper"><canvas id="navChart"></canvas></div>
+            </div>
+
+            <!-- RETURNS -->
+            <div class="section">
+                <h3>Returns</h3>
+                <p class="desc">Point-to-point CAGR and absolute returns across standard periods</p>
+                ${renderReturnsTable(ptp)}
+            </div>
+
+            <!-- ROLLING RETURNS -->
+            ${renderRollingSection(rolling)}
+
+            <!-- RISK METRICS -->
+            ${renderRiskSection(risk)}
+
+            <!-- CAPTURE RATIOS -->
+            ${renderCaptureSection(capture)}
+
+            <!-- DISCLAIMER -->
+            <div class="disclaimer">
+                <strong>Disclaimer:</strong> ${data.disclaimer}
+            </div>
+
+            <div class="footer">
+                MoneyIQ Fund Analyzer &bull; Data from <a href="https://www.mfapi.in" target="_blank">mfapi.in</a> (AMFI) &bull;
+                Report generated ${data.calculated_at}
+            </div>
+        `;
+
+        reportEl.classList.add('show');
+
+        // Render NAV chart
+        renderNavChart(nav);
+        // Render rolling return charts
+        renderRollingCharts(rolling);
+    }
+
+    // =====================================================================
+    // RETURNS TABLE
+    // =====================================================================
+    function renderReturnsTable(ptp) {
+        if (!ptp || !Object.keys(ptp).length) return '<p class="c-muted">No return data available</p>';
+        const periods = ['1Y', '3Y', '5Y', '7Y', '10Y', 'since_inception'];
+        let rows = '';
+        for (const p of periods) {
+            if (!ptp[p]) continue;
+            const d = ptp[p];
+            const label = p === 'since_inception' ? `Since Inception (${d.years}Y)` : p;
+            const cagrColor = d.cagr_pct >= 0 ? 'c-green' : 'c-red';
+            const absColor = d.absolute_return_pct >= 0 ? 'c-green' : 'c-red';
+            rows += `<tr>
+                <td class="fw-bold">${label}</td>
+                <td class="text-right ${cagrColor} fw-bold">${d.cagr_pct}%</td>
+                <td class="text-right ${absColor}">${d.absolute_return_pct}%</td>
+                <td class="text-right c-muted">${d.start_date}</td>
+                <td class="text-right c-muted">₹${d.start_nav} → ₹${d.end_nav}</td>
+            </tr>`;
+        }
+        return `<table class="data-table">
+            <thead><tr>
+                <th>Period</th><th class="text-right">CAGR</th><th class="text-right">Absolute</th>
+                <th class="text-right">From</th><th class="text-right">NAV</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    // =====================================================================
+    // ROLLING RETURNS
+    // =====================================================================
+    function renderRollingSection(rolling) {
+        if (!rolling || !Object.keys(rolling).length) return '';
+        const tabs = Object.keys(rolling);
+
+        let tabBtns = tabs.map((t, i) => `<button class="tab-btn ${i===0?'active':''}" onclick="switchRollingTab('${t}')">${t}</button>`).join('');
+
+        let panels = '';
+        for (const t of tabs) {
+            const r = rolling[t];
+            const s = r.summary;
+            if (!s) continue;
+            panels += `<div id="rolling-${t}" class="tab-panel ${t===tabs[0]?'active':''}">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-val c-green">${s.median_pct}%</div>
+                        <div class="stat-label">Median CAGR</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-val">${s.best_pct}%</div>
+                        <div class="stat-label">Best</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-val c-red">${s.worst_pct}%</div>
+                        <div class="stat-label">Worst</div>
+                    </div>
+                    <div class="stat-card highlight">
+                        <div class="stat-val">${s.positive_probability_pct}%</div>
+                        <div class="stat-label">Positive Probability</div>
+                    </div>
+                </div>
+                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));">
+                    <div class="stat-card">
+                        <div class="stat-val" style="font-size:18px;">${s.p10_pct}%</div>
+                        <div class="stat-label">10th %ile</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-val" style="font-size:18px;">${s.p25_pct}%</div>
+                        <div class="stat-label">25th %ile</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-val" style="font-size:18px;">${s.p75_pct}%</div>
+                        <div class="stat-label">75th %ile</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-val" style="font-size:18px;">${s.p90_pct}%</div>
+                        <div class="stat-label">90th %ile</div>
+                    </div>
+                </div>
+                <div class="chart-wrapper"><canvas id="rollingChart-${t}"></canvas></div>
+                <div class="explainer">
+                    <strong>What this means:</strong> If you had invested in this fund on any random day and held for ${r.window_years} years,
+                    your return would have been positive ${s.positive_probability_pct}% of the time,
+                    with a median CAGR of ${s.median_pct}%. ${s.total_windows} overlapping periods analyzed.
+                </div>
+            </div>`;
+        }
+
+        return `<div class="section">
+            <h3>Rolling Returns</h3>
+            <p class="desc">Every possible return for a given holding period — shows consistency and range of outcomes</p>
+            <div class="tab-bar">${tabBtns}</div>
+            ${panels}
+        </div>`;
+    }
+
+    function switchRollingTab(t) {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('rolling-' + t).classList.add('active');
+        event.target.classList.add('active');
+    }
+
+    // =====================================================================
+    // RISK METRICS
+    // =====================================================================
+    function renderRiskSection(risk) {
+        if (!risk || !Object.keys(risk).length) return '';
+        const sharpeColor = risk.sharpe_ratio >= 1 ? 'c-green' : risk.sharpe_ratio >= 0.5 ? 'c-yellow' : 'c-red';
+        const ddColor = risk.max_drawdown_pct > -30 ? 'c-yellow' : 'c-red';
+        const recoveryText = risk.recovery_days ? `${risk.recovery_days} days` : 'Not yet';
+
+        return `<div class="section">
+            <h3>Risk Metrics</h3>
+            <p class="desc">Volatility, risk-adjusted returns, and drawdown analysis based on daily NAV data</p>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-val">${risk.annualized_volatility_pct}%</div>
+                    <div class="stat-label">Volatility (Ann.)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val ${sharpeColor}">${risk.sharpe_ratio}</div>
+                    <div class="stat-label">Sharpe Ratio</div>
+                    <div class="stat-hint">vs ${risk.risk_free_rate_used_pct}% risk-free</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val ${sharpeColor}">${risk.sortino_ratio}</div>
+                    <div class="stat-label">Sortino Ratio</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val ${ddColor}">${risk.max_drawdown_pct}%</div>
+                    <div class="stat-label">Max Drawdown</div>
+                    <div class="stat-hint">Worst peak-to-trough</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val" style="font-size:13px;">${risk.max_drawdown_peak_date} → ${risk.max_drawdown_trough_date}</div>
+                    <div class="stat-label">Drawdown Period</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val">${recoveryText}</div>
+                    <div class="stat-label">Recovery Time</div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // =====================================================================
+    // CAPTURE RATIOS
+    // =====================================================================
+    function renderCaptureSection(capture) {
+        if (!capture || !Object.keys(capture).length) return '';
+
+        // Pick primary period
+        const primaryKey = capture.since_inception ? 'since_inception' :
+                           capture['5Y'] ? '5Y' : capture['3Y'] ? '3Y' : null;
+        if (!primaryKey) return '';
+        const p = capture[primaryKey];
+        const bm = p.benchmark || 'Benchmark';
+
+        const upColor = p.up_capture_pct >= 100 ? 'c-green' : p.up_capture_pct >= 80 ? 'c-yellow' : 'c-red';
+        const dnColor = p.down_capture_pct < 100 ? 'c-green' : p.down_capture_pct < 110 ? 'c-yellow' : 'c-red';
+        const rtColor = p.capture_ratio >= 1.0 ? 'c-green' : p.capture_ratio >= 0.85 ? 'c-yellow' : 'c-red';
+
+        // Period rows
+        let rows = '';
+        for (const label of ['3Y', '5Y', 'since_inception']) {
+            const cr = capture[label];
+            if (!cr) continue;
+            const displayLabel = label === 'since_inception' ? 'Since Inception' : label;
+            const uc = cr.up_capture_pct >= 100 ? 'c-green' : cr.up_capture_pct >= 80 ? 'c-yellow' : 'c-red';
+            const dc = cr.down_capture_pct < 100 ? 'c-green' : cr.down_capture_pct < 110 ? 'c-yellow' : 'c-red';
+            const rc = cr.capture_ratio >= 1.0 ? 'c-green' : cr.capture_ratio >= 0.85 ? 'c-yellow' : 'c-red';
+            rows += `<tr>
+                <td class="fw-bold">${displayLabel}</td>
+                <td class="text-right ${uc} fw-bold">${cr.up_capture_pct}%</td>
+                <td class="text-right ${dc} fw-bold">${cr.down_capture_pct}%</td>
+                <td class="text-right ${rc} fw-bold">${cr.capture_ratio}</td>
+                <td class="text-right c-muted">${cr.total_months_analyzed} months</td>
+            </tr>`;
+        }
+
+        return `<div class="section">
+            <h3>Market Capture Ratios</h3>
+            <p class="desc">How the fund performs relative to ${bm} in rising and falling markets</p>
+            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="stat-card">
+                    <div class="stat-val ${upColor}">${p.up_capture_pct}%</div>
+                    <div class="stat-label">Up-Market Capture</div>
+                    <div class="stat-hint">${p.up_capture_pct >= 100 ? 'Beats' : 'Trails'} ${bm} by ${Math.abs(p.up_capture_pct - 100).toFixed(0)}% in rising months</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val ${dnColor}">${p.down_capture_pct}%</div>
+                    <div class="stat-label">Down-Market Capture</div>
+                    <div class="stat-hint">Falls ${p.down_capture_pct < 100 ? 'less' : 'more'} than ${bm} by ${Math.abs(p.down_capture_pct - 100).toFixed(0)}% in falling months</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val ${rtColor}">${p.capture_ratio}</div>
+                    <div class="stat-label">Capture Ratio</div>
+                    <div class="stat-hint">Up ÷ Down. Above 1.0 = ${p.capture_ratio >= 1.0 ? 'good risk-adjusted behavior ✓' : 'room for improvement'}</div>
+                </div>
+            </div>
+            <table class="data-table">
+                <thead><tr>
+                    <th>Period</th><th class="text-right">Up Capture</th><th class="text-right">Down Capture</th>
+                    <th class="text-right">Ratio</th><th class="text-right">Data</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <div class="explainer">
+                <strong>How to read this:</strong> Up-market capture shows how much of the market's gains this fund captures when markets rise.
+                Down-market capture shows how much of the market's losses the fund absorbs when markets fall.
+                <strong>Ideal:</strong> Up capture > 100% and Down capture < 100%.
+                The Capture Ratio above 1.0 means the fund has historically delivered better risk-adjusted returns than ${bm}.
+                <br><br>
+                <strong>Benchmark:</strong> ${bm} — auto-selected based on fund category.
+                Months analyzed: ${p.up_months_analyzed} up months, ${p.down_months_analyzed} down months.
+            </div>
+        </div>`;
+    }
+
+    // =====================================================================
+    // CHARTS
+    // =====================================================================
+    function renderNavChart(navData) {
+        if (!navData || !navData.length) return;
+        const ctx = document.getElementById('navChart');
+        if (!ctx) return;
+
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: navData.map(d => d.date),
+                datasets: [{
+                    label: 'NAV (₹)',
+                    data: navData.map(d => d.nav),
+                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                    fill: true, pointRadius: 0, borderWidth: 2, tension: 0.1,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: {
+                        ticks: { maxTicksLimit: 8, color: '#64748b', font: { size: 11 } },
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                    },
+                    y: {
+                        ticks: { color: '#64748b', font: { size: 11 }, callback: v => '₹' + v },
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                    }
+                },
+                interaction: { intersect: false, mode: 'index' },
+            }
+        });
+    }
+
+    function renderRollingCharts(rolling) {
+        if (!rolling) return;
+        for (const [key, data] of Object.entries(rolling)) {
+            const canvas = document.getElementById('rollingChart-' + key);
+            if (!canvas || !data.time_series) continue;
+
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: data.time_series.map(d => d.start_date),
+                    datasets: [{
+                        label: `${key} Rolling CAGR (%)`,
+                        data: data.time_series.map(d => d.cagr_pct),
+                        borderColor: '#818cf8',
+                        backgroundColor: 'rgba(129, 140, 248, 0.08)',
+                        fill: true, pointRadius: 0, borderWidth: 1.5, tension: 0.1,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            ticks: { maxTicksLimit: 8, color: '#64748b', font: { size: 11 } },
+                            grid: { color: 'rgba(255,255,255,0.04)' },
+                        },
+                        y: {
+                            ticks: { color: '#64748b', font: { size: 11 }, callback: v => v + '%' },
+                            grid: { color: 'rgba(255,255,255,0.04)' },
+                        }
+                    },
+                    interaction: { intersect: false, mode: 'index' },
+                }
+            });
+        }
+    }
+    </script>
+</body>
+</html>
